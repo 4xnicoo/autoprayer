@@ -43,6 +43,9 @@ On first run, you'll be prompted to enter your API keys:
 - Anthropic API key for Claude
 - ElevenLabs API key for voiceover generation
 
+- > [!WARNING]  
+> Anthropic and ElevenLabs API has usage costs. Although small, the usage costs can become expensive quickly. We are not responsible for any software failures resulting in elevated API costs/usage.
+
 These will be saved in `config.json` for future use.
 
 ## Usage
