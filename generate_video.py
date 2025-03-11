@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip, concatenate_videoclips, TextClip
 import anthropic
-from elevenlabs import generate, save, set_api_key
+from elevenlabs import generate, set_api_key, save
 import numpy as np
 from PIL import Image
 from proglog import ProgressBarLogger
@@ -14,6 +14,72 @@ import threading
 import itertools
 import subprocess
 from moviepy.config import change_settings
+import requests
+from tqdm import tqdm
+
+def download_file(url, destination, desc=None):
+    response = requests.get(url, stream=True)
+    total_size = int(response.headers.get('content-length', 0))
+    block_size = 1024
+    progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True, desc=desc)
+    
+    with open(destination, 'wb') as file:
+        for data in response.iter_content(block_size):
+            progress_bar.update(len(data))
+            file.write(data)
+    progress_bar.close()
+
+def setup_background_videos():
+    video_dir = Path('resources/background-videos')
+    if not video_dir.exists():
+        video_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not list(video_dir.glob('*.mp4')):
+        time.sleep(1)
+        os.system('cls')
+        print(f"\n{Colors.YELLOW}No background videos found!{Colors.RESET}")
+        while True:
+            response = input(f"\n{Colors.BOLD}Would you like to download the starter background videos pack? (y/n):{Colors.RESET} ").strip().lower()
+            if response in ['y', 'n']:
+                break
+            print(f"{Colors.RED}Please enter 'y' or 'n'{Colors.RESET}")
+        
+        if response == 'y':
+            print(f"\n{Colors.BLUE}Opening the GitHub repository with background videos...{Colors.RESET}")
+            
+            # GitHub repository URL
+            repo_url = "https://github.com/4xnicoo/autoprayer-videokit"
+            
+            try:
+                # Open the URL in the default web browser
+                import webbrowser
+                webbrowser.open(repo_url)
+                
+                print(f"\n{Colors.GREEN}GitHub repository opened in your browser.{Colors.RESET}")
+                print(f"\n{Colors.YELLOW}Instructions:{Colors.RESET}")
+                print(f"1. Download the video files you want from the repository")
+                print(f"2. Save them to the {video_dir} directory")
+                print(f"3. Run this program again")
+                
+                # Ask if the user wants to continue or wait
+                while True:
+                    continue_response = input(f"\n{Colors.BOLD}Have you downloaded the videos? (y/n):{Colors.RESET} ").strip().lower()
+                    if continue_response in ['y', 'n']:
+                        break
+                    print(f"{Colors.RED}Please enter 'y' or 'n'{Colors.RESET}")
+                
+                if continue_response == 'n':
+                    print(f"\n{Colors.YELLOW}Please add background videos to the {video_dir} directory before running the program again.{Colors.RESET}")
+                    sys.exit(0)
+                
+            except Exception as e:
+                print(f"{Colors.RED}Failed to open the browser: {str(e)}{Colors.RESET}")
+                print(f"\n{Colors.YELLOW}Please visit this URL manually: {repo_url}{Colors.RESET}")
+                print(f"\n{Colors.YELLOW}Download the videos and save them to the {video_dir} directory.{Colors.RESET}")
+                sys.exit(1)
+        else:
+            print(f"\n{Colors.YELLOW}Please add your own background videos to the {video_dir} directory.{Colors.RESET}")
+            sys.exit(1)
 
 def setup_imagemagick():
     """Install and configure ImageMagick for MoviePy."""
@@ -128,8 +194,6 @@ def process_with_spinner(message, func, *args, **kwargs):
         raise e
 
 print('Verifying system requirements..')
-os.system('pip uninstall -y pillow') 
-os.system('pip install -r requirements.txt --no-cache-dir')
 print('System requirements verified.')
 time.sleep(0.5)
 os.system('cls')
@@ -212,17 +276,55 @@ def create_voiceover(script, api_key):
     """Generate voiceover using ElevenLabs API."""
     if not isinstance(script, str):
         raise TypeError(f"Expected string script, got {type(script)}")
-        
-    set_api_key(api_key)
-    audio = generate(
-        text=script,
-        voice="0rTCgryT71xGPrgtinaj", 
-        model="eleven_multilingual_v2"
-    )
     
-    temp_audio_path = "temp_voiceover.mp3"
-    save(audio, temp_audio_path)
-    return temp_audio_path
+    set_api_key(api_key)
+    
+    try:
+        # Simple approach for version 0.2.19
+        audio = generate(
+            text=script,
+            voice="0rTCgryT71xGPrgtinaj",  # Direct voice ID
+            model="eleven_multilingual_v2"
+        )
+        
+        temp_audio_path = "temp_voiceover.mp3"
+        save(audio, temp_audio_path)
+        return temp_audio_path
+    except Exception as e:
+        print(f"{Colors.YELLOW}First attempt failed, trying alternative method...{Colors.RESET}")
+        try:
+            # Fallback to direct API call
+            import requests
+            
+            url = "https://api.elevenlabs.io/v1/text-to-speech/0rTCgryT71xGPrgtinaj"
+            
+            headers = {
+                "Accept": "audio/mpeg",
+                "Content-Type": "application/json",
+                "xi-api-key": api_key
+            }
+            
+            data = {
+                "text": script,
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.75
+                }
+            }
+            
+            response = requests.post(url, json=data, headers=headers)
+            
+            temp_audio_path = "temp_voiceover.mp3"
+            with open(temp_audio_path, 'wb') as f:
+                f.write(response.content)
+            
+            return temp_audio_path
+        except Exception as e2:
+            print(f"{Colors.RED}Both voiceover generation methods failed!{Colors.RESET}")
+            print(f"{Colors.RED}First error: {str(e)}{Colors.RESET}")
+            print(f"{Colors.RED}Second error: {str(e2)}{Colors.RESET}")
+            raise e2
 
 def safe_close(clip):
     """Safely close a MoviePy clip."""
@@ -380,6 +482,7 @@ def create_final_video(background_video_path, audio_path, title, description, ou
 def main():
     try:
         setup_imagemagick()
+        setup_background_videos()
         
         config = setup_api_keys()
         
